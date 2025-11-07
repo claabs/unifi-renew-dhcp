@@ -9,7 +9,7 @@ A script that monitors internet connectivity for a short window and, if the WAN 
 ```sh
 docker run --rm -ti \
   -v $(pwd)/data:/data \
-  -e TZ=America/Chicago \
+  -e TZ=UTC \
   -e UNIFI_HOST=192.168.2.1 \
   -e WAN_INTERFACE=eth9 \
   ghcr.io/claabs/unifi-renew-dhcp
@@ -23,10 +23,11 @@ services:
     image: ghcr.io/claabs/unifi-renew-dhcp
     restart: unless-stopped
     environment:
-      - TZ=America/Chicago
+      # UTC ignores DST, and so do the AT&T outages
+      - TZ=UTC
       - UNIFI_HOST=192.168.2.1
       - WAN_INTERFACE=eth9
-      # prime with initial cron schedule of slightly before when your next outage will be
+      # prime with initial cron schedule of slightly before when your next outage will be. Should be in UTC timezone
       - CRON_SCHEDULE=32 21 09 11 *
     volumes:
     - ./data:/data
@@ -45,7 +46,7 @@ services:
 - `PING_TARGET` (default: `8.8.8.8`)
   - IP address used for the connectivity check ping. Change if you prefer another reliable host.
 - `CRON_SCHEDULE` (optional)
-  - Used to prime with initial cron schedule of slightly before when your next outage will be. If not provided, the container will use the schedule stored in  `/data/cron_schedule.txt`, or fall back to computing a schedule of "now + 2 weeks - 1 minute".
+  - Used to prime with initial cron schedule of slightly before when your next outage will be. If not provided, the container will use the schedule stored in  `/data/cron_schedule.txt`, or fall back to computing a schedule of "now + 2 weeks - 1 minute". This should be in the UTC timezone because the outages don't observe DST.
 
 ### Files in the `/data` volume
 
@@ -54,11 +55,11 @@ Mount a host directory to `/data` inside the container. The container uses the f
 - `/data/sshpass.txt` **(Required)**
   - Plain-text SSH password for your Unifi console
 - `/data/cron_schedule.txt`
-  - Stores the active crontab schedule line (cron-format). Updated to 2 weeks later after every run of the repair script.
+  - Stores the active crontab schedule line (cron-format). Updated to 2 weeks later after every run of the repair script.  This should be in the UTC timezone because the outages don't observe DST.
 
 ## Development
 
 ```sh
 docker build -t unifi-renew-dhcp .
-docker run --rm -ti -v $(pwd)/data:/data -e TZ=America/Chicago -e UNIFI_HOST=192.168.2.1 unifi-renew-dhcp
+docker run --rm -ti -v $(pwd)/data:/data -e TZ=UTC -e UNIFI_HOST=192.168.2.1 unifi-renew-dhcp
 ```
