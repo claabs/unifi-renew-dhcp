@@ -6,7 +6,7 @@ UNIFI_HOST=${UNIFI_HOST:-"192.168.1.1"}
 echo "UNIFI_HOST is set to: $UNIFI_HOST"
 WAN_INTERFACE=${WAN_INTERFACE:-"eth9"}
 echo "WAN_INTERFACE is set to: $WAN_INTERFACE"
-WAN_RESTORE_WAIT=${WAN_RESTORE_WAIT:-10}
+WAN_RESTORE_WAIT=${WAN_RESTORE_WAIT:-15}
 echo "WAN_RESTORE_WAIT is set to: $WAN_RESTORE_WAIT"
 CHECK_DURATION=${CHECK_DURATION:-3600}
 echo "CHECK_DURATION is set to: $CHECK_DURATION"
@@ -19,6 +19,17 @@ check_internet() {
     ping -c 1 "$PING_TARGET" > /dev/null 2>&1
     return $?
 }
+
+# Function to check internet connectivity (3 consecutive successful pings)
+check_internet_strict() {
+    for i in 1 2 3; do
+        if ! ping -c 1 "$PING_TARGET" > /dev/null 2>&1; then
+            return 1
+        fi
+    done
+    return 0
+}
+
 
 # Function to update crontab for next run (2 weeks minus 1 minute from now)
 update_crontab() {
@@ -40,19 +51,31 @@ while [ $(date +%s) -lt $end_time ]; do
         # Update crontab for next run
         update_crontab
         
-        # Run the DHCP renewal command
-        sshpass -f /data/sshpass.txt ssh -o StrictHostKeyChecking=no root@"$UNIFI_HOST" "/usr/bin/busybox-legacy/udhcpc --interface $WAN_INTERFACE --script /usr/share/ubios-udapi-server/ubios-udhcpc-script --decline-script /usr/share/ubios-udapi-server/ubios-udhcpc-decline-script"
+        # Retry DHCP renewal up to 3 times (initial + 2 retries)
+        retry_count=0
+        max_retries=3
+        while [ $retry_count -lt $max_retries ]; do
+            retry_count=$((retry_count + 1))
+            echo "DHCP renewal attempt $retry_count..."
+            
+            # Run the DHCP renewal command
+            sshpass -f /data/sshpass.txt ssh -o StrictHostKeyChecking=no root@"$UNIFI_HOST" "/usr/bin/busybox-legacy/udhcpc --interface $WAN_INTERFACE --script /usr/share/ubios-udapi-server/ubios-udhcpc-script --decline-script /usr/share/ubios-udapi-server/ubios-udhcpc-decline-script"
+            
+            # Wait a bit for the connection to be restored
+            sleep $WAN_RESTORE_WAIT
+            
+            if check_internet_strict; then
+                echo "Internet connection restored!"
+                exit 0
+            fi
+            
+            if [ $retry_count -lt $max_retries ]; then
+                echo "Connectivity check failed. Retrying DHCP renewal..."
+            fi
+        done
         
-        # Wait a bit for the connection to be restored
-        sleep $WAN_RESTORE_WAIT
-        
-        if check_internet; then
-            echo "Internet connection restored!"
-            exit 0
-        else
-            echo "Failed to restore internet connection!"
-            exit 1
-        fi
+        echo "Failed to restore internet connection after $max_retries attempts!"
+        exit 1
         
     fi
     sleep 1
